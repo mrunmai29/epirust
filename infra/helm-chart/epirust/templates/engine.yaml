@@ -1,0 +1,72 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Values.engine.fullname }}
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/path: /metrics
+    prometheus.io/port: "8080"
+spec:
+  completions: {{ .Values.engine.spec.completions }}
+  parallelism: {{ .Values.engine.spec.parallelism }}
+  completionMode: Indexed
+  template:
+    spec:
+      securityContext:
+        runAsUser: {{ .Values.securityContext.runAsUser }}
+        fsGroup: {{ .Values.securityContext.fsGroup }}
+        runAsGroup: {{ .Values.securityContext.runAsGroup }}
+      initContainers:
+        - name: epirust-mount
+          image: {{ .Values.engine.image.repository }}:{{ .Values.engine.image.tag }}
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - mountPath: {{ .Values.storage.volumeMounts.output.mountPath }}
+              name: {{ .Values.storage.volumes.name }}
+              subPath: {{ .Values.storage.volumeMounts.output.subPath }}
+          command: [ "/bin/sh", "-c" ]
+          args: ["cd {{ .Values.storage.volumeMounts.output.mountPath }};chown nonroot:nonroot . ./*; chmod +rwx . ./*;"]
+      containers:
+        - name: {{ .Values.engine.fullname }}
+          image: {{ .Values.engine.image.repository }}:{{ .Values.engine.image.tag }}
+          imagePullPolicy: {{ .Values.engine.image.pullPolicy }}
+          command: [ "/bin/sh", "-c" ]
+          args:
+          {{ if .Values.multiengineSim }}
+            [ "jq .travel_plan.regions[$(JOB_COMPLETION_INDEX)] {{ .Values.storage.volumeMounts.config.mountPath }}/{{ .Values.config }} | xargs ./epirust-engine -d  2> {{ .Values.storage.volumeMounts.output.mountPath }}/logs/$(JOB_COMPLETION_INDEX)_logs.txt -t {{ .Values.engine.number_of_threads }} -i" ]
+          {{ else }}
+            [ "./epirust-engine -t {{ .Values.engine.number_of_threads }} -c config/{{ .Values.config }} 2> {{ .Values.storage.volumeMounts.output.mountPath }}/logs/{{ .Values.config }}_logs.txt" ]
+          {{ end }}
+          resources:
+            requests:
+              cpu: {{ .Values.engine.resources.requests.cpu }}
+              memory: {{ .Values.engine.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.engine.resources.limits.cpu }}
+              memory: {{ .Values.engine.resources.limits.memory }}
+          volumeMounts:
+            - mountPath: {{ .Values.storage.volumeMounts.output.mountPath }}
+              name: {{ .Values.storage.volumes.name }}
+              subPath: {{ .Values.storage.volumeMounts.output.subPath }}
+            - mountPath: {{ .Values.storage.volumeMounts.config.mountPath }}
+              name: {{ .Values.storage.volumes.name }}
+              subPath: {{ .Values.storage.volumeMounts.config.subPath }}
+          securityContext:
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: {{ .Values.securityContext.readOnlyRootFilesystem }}
+            runAsNonRoot: {{ .Values.securityContext.runAsNonRoot }}
+            allowPrivilegeEscalation: {{ .Values.securityContext.allowPrivilegeEscalation }}
+            runAsUser: {{ .Values.securityContext.runAsUser }}
+            runAsGroup: {{ .Values.securityContext.runAsGroup }}
+            seccompProfile:
+              type: {{ .Values.securityContext.seccompProfile.type }}
+          env:
+          {{- include "helpers.list-engine-env-variables" . | indent 8 }}
+      restartPolicy: Never
+      volumes:
+        - name: {{ .Values.storage.volumes.name }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.storage.volumes.claimName }}
