@@ -1,0 +1,14 @@
+/target
+**/*.rs.bk
+.vscode/
+
+# intellij
+.idea/
+!.idea/copyright/
+!.idea/codeStyleSettings.xml
+!.idea/jsLinters/eslint.xml
+bin/
+*.iml
+
+.DS_Store
+Cargo.lock
